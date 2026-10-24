@@ -4,6 +4,7 @@ from __future__ import annotations
 import shutil
 import argparse
 import os
+import re
 from pathlib import Path
 
 
@@ -31,6 +32,44 @@ def replace_once(path: Path, old: str, new: str, *, label: str) -> None:
 def patch_file(path: Path, replacements: list[tuple[str, str, str]]) -> None:
     for old, new, label in replacements:
         replace_once(path, old, new, label=label)
+
+
+def parse_base_version_code(gradle_text: str) -> int:
+    lines = [line for line in gradle_text.splitlines() if re.search(r"\bversionCode\b", line)]
+    if len(lines) != 1:
+        raise ValueError("Selected DAXQO build.gradle must contain exactly one versionCode assignment")
+    match = re.fullmatch(r"\s*versionCode\s+(\d+)\s*", lines[0])
+    if not match:
+        raise ValueError("Selected DAXQO versionCode must be a single-line integer assignment")
+    value = int(match.group(1))
+    if not 1 <= value <= 2_100_000_000:
+        raise ValueError("Selected DAXQO versionCode is outside the Android range")
+    return value
+
+
+def validate_collector_version_code(version_code: int, base_code: int) -> None:
+    if not isinstance(version_code, int) or not 1 <= version_code <= 2_100_000_000:
+        raise ValueError("Invalid collector APK version code (expected 1..2100000000)")
+    if version_code <= base_code:
+        raise ValueError(f"Collector version code {version_code} must exceed selected DAXQO base code {base_code}; pass --version-code explicitly")
+
+
+def select_collector_version_code(base_code: int, requested: int | None = None) -> int:
+    version_code = max(VERSION_CODE, base_code + 1) if requested is None else requested
+    validate_collector_version_code(version_code, base_code)
+    return version_code
+
+
+def collector_version_gradle(gradle_text: str, version_code: int) -> str:
+    base_code = parse_base_version_code(gradle_text)
+    validate_collector_version_code(version_code, base_code)
+    pattern = rf"(?m)^([ \t]*)versionCode[ \t]+{base_code}[ \t]*$"
+    result, count = re.subn(pattern,
+        rf"\g<1>versionCode project.hasProperty('trajectoryBuild') ? {version_code} : {base_code}",
+        gradle_text, count=1)
+    if count != 1:
+        raise ValueError("Selected DAXQO versionCode assignment changed during staging")
+    return result
 
 
 def stage_android() -> None:
@@ -126,9 +165,8 @@ def stage_android() -> None:
         label="click/scroll event types")
 
     gradle = STAGE / "android" / "app" / "build.gradle"
-    patch_file(gradle, [
-        ("        versionCode 5\n", f"        versionCode project.hasProperty('trajectoryBuild') ? {VERSION_CODE} : 5\n", "collector version code"),
-    ])
+    gradle_text = gradle.read_text(encoding="utf-8")
+    gradle.write_text(collector_version_gradle(gradle_text, VERSION_CODE), encoding="utf-8", newline="\n")
     shutil.copy2(ADDONS / "android" / "TrajectoryRecorder.java",
                  app_java / "TrajectoryRecorder.java")
     # OEM guidance comes solely from the selected, versioned bridge checkout.
@@ -190,15 +228,19 @@ def main() -> int:
     parser.add_argument('--source', type=Path, default=os.environ.get('DAXQO_ANDROID_SOURCE'),
                         help='Explicit read-only compatible DAXQO checkout (or DAXQO_ANDROID_SOURCE)')
     parser.add_argument('--stage', type=Path, default=STAGE)
-    parser.add_argument('--version-code', type=int, default=8, help='Must exceed the currently installed APK code')
+    parser.add_argument('--version-code', type=int, default=None,
+                        help='Optional explicit APK code; defaults to max(8, selected DAXQO base + 1)')
     args = parser.parse_args()
     if args.source is None:
         parser.error('Pass --source or set DAXQO_ANDROID_SOURCE; no local checkout is assumed')
     STAGE = args.stage.resolve()
-    V05, VERSION_CODE = args.source.resolve(), args.version_code
-    if not 6 <= VERSION_CODE <= 2_100_000_000: raise ValueError('Invalid collector APK version code')
+    V05 = args.source.resolve()
     if not V05.is_dir():
         raise FileNotFoundError(f"Read-only v0.5 source not found: {V05}")
+    gradle_path = V05 / "android" / "app" / "build.gradle"
+    if not gradle_path.is_file(): raise FileNotFoundError(f"Selected DAXQO build.gradle not found: {gradle_path}")
+    base_code = parse_base_version_code(gradle_path.read_text(encoding="utf-8"))
+    VERSION_CODE = select_collector_version_code(base_code, args.version_code)
     if STAGE == V05 or V05 in STAGE.parents or STAGE in V05.parents:
         raise ValueError('Staging and source directories must be separate')
     STAGE.mkdir(parents=True, exist_ok=True)

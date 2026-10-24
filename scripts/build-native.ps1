@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('standard', 'xm')]
     [string]$Platform,
-    [int]$VersionCode = 8,
+    [int]$VersionCode,
     [Parameter(Mandatory = $true)]
     [string]$Source,
     [string]$ToolsRoot = $env:DAXQO_ANDROID_TOOLS
@@ -27,10 +27,25 @@ function Get-FreeAsciiDrives([int]$Count) {
 }
 
 try {
-    $prepareArgs = @((Join-Path $PSScriptRoot 'prepare_native.py'), '--version-code', "$VersionCode")
+    $prepareArgs = @((Join-Path $PSScriptRoot 'prepare_native.py'))
+    if ($PSBoundParameters.ContainsKey('VersionCode')) { $prepareArgs += @('--version-code', "$VersionCode") }
     if ($Source) { $prepareArgs += @('--source', $Source) }
     & python @prepareArgs
     if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the v0.5 staged source.' }
+    $stagedGradle = Join-Path $project 'dist\native-v05\android\app\build.gradle'
+    $versionLines = @(Get-Content -LiteralPath $stagedGradle | Where-Object { $_ -match '\bversionCode\b' })
+    if ($versionLines.Count -ne 1 -or $versionLines[0] -notmatch "^\s*versionCode\s+project\.hasProperty\('trajectoryBuild'\)\s*\?\s*(\d+)\s*:\s*(\d+)\s*$") {
+        throw 'Staged Collector versionCode expression is missing or ambiguous.'
+    }
+    $expectedVersionCode = [int]$Matches[1]
+    if ($PSBoundParameters.ContainsKey('VersionCode') -and $expectedVersionCode -ne $VersionCode) {
+        throw 'Staged Collector versionCode does not match the requested value.'
+    }
+    $versionNameLines = @(Get-Content -LiteralPath $stagedGradle | Where-Object { $_ -match '\bversionName\b' })
+    if ($versionNameLines.Count -ne 1) { throw 'Staged DAXQO versionName is missing or ambiguous.' }
+    $versionNameMatch = [regex]::Match($versionNameLines[0], "^\s*versionName\s+xmBuild\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*$")
+    if (!$versionNameMatch.Success) { throw 'Staged DAXQO versionName expression is not the expected strict xmBuild condition.' }
+    $expectedVersionName = if ($Platform -eq 'xm') { $versionNameMatch.Groups[1].Value } else { $versionNameMatch.Groups[2].Value }
 
     $letters = Get-FreeAsciiDrives 2
     $toolDrive = "$($letters[0]):"
@@ -65,8 +80,9 @@ try {
     $expectedPackage = if ($Platform -eq 'xm') { 'io.daxqo.xm' } else { 'io.daxqo.app' }
     $packageLine = $badging | Where-Object { $_ -match '^package:' } | Select-Object -First 1
     if ($packageLine -notmatch "name='$expectedPackage'") { throw "Unexpected APK package for $Platform." }
-    if ($packageLine -notmatch "versionCode='$VersionCode'") { throw 'APK versionCode does not match the requested value.' }
-    if ($packageLine -notmatch "versionName='0\.5\.0(?:-xm)?'") { throw 'APK does not retain the v0.5 version name.' }
+    if ($packageLine -notmatch "versionCode='$expectedVersionCode'") { throw 'APK versionCode does not match the staged versionCode.' }
+    $escapedVersionName = [regex]::Escape($expectedVersionName)
+    if ($packageLine -notmatch "versionName='$escapedVersionName'") { throw 'APK versionName does not match the staged platform-specific versionName.' }
 
     $destinationName = if ($Platform -eq 'xm') { 'daxqo-xm-collector-v05.apk' } else { 'daxqo-standard-collector-v05.apk' }
     $destination = Join-Path $project "dist\$destinationName"

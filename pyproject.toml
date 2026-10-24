@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daxqo-trajectory-collector"
+version = "0.1.0"
+description = "Harness-independent local GUI action recording, privacy filtering, replay and dataset export"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "DAXQO contributors"}]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["android", "agent", "trajectory", "mcp", "dataset"]
+
+[project.optional-dependencies]
+dev = ["build>=1.2", "mcp>=1.12,<2"]
+
+[project.scripts]
+daxqo-collect = "trajectory.cli:main"
+daxqo-collect-mcp = "trajectory.mcp_server:main"
+
+[project.urls]
+Repository = "https://github.com/axiomzero-qed/DAXQO-Trajectory-Collector"
+Issues = "https://github.com/axiomzero-qed/DAXQO-Trajectory-Collector/issues"
+
+[tool.setuptools.packages.find]
+include = ["trajectory*"]

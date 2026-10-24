@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daxqo.invalid/schema/trajectory-v0.1.schema.json",
+  "title": "DAXQO trajectory record v0.1",
+  "type": "object",
+  "required": ["schema_version", "record_type", "record_id", "device", "session_id", "task", "action_id", "started_at", "finished_at"],
+  "properties": {
+    "schema_version": {"const": "daxqo.trajectory/0.1"},
+    "record_type": {"enum": ["action", "agent_feedback", "task_event"]},
+    "record_id": {"type": "string", "format": "uuid"},
+    "device": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "format": "uuid"}}, "additionalProperties": true},
+    "session_id": {"type": "string", "format": "uuid"},
+    "task": {"type": "object", "required": ["id", "user_task", "subgoal", "stage", "source"], "properties": {
+      "id": {"type": "string"}, "user_task": {"type": "string"}, "subgoal": {"type": "string"}, "stage": {"type": "string"}, "source": {"type": "string"}
+    }, "additionalProperties": true},
+    "action_id": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "before": {"$ref": "#/$defs/state"},
+    "after": {"$ref": "#/$defs/state"},
+    "action": {"type": "object", "required": ["type", "target", "parameters"], "properties": {
+      "type": {"type": "string"}, "target": {"type": ["string", "object"]}, "parameters": {"type": "object"}
+    }, "additionalProperties": true},
+    "decision": {"type": "object", "default": {}, "additionalProperties": true},
+    "result": {"type": "object", "required": ["status", "error_code", "verification"], "properties": {
+      "status": {"enum": ["succeeded", "failed", "unknown"]}, "error_code": {"type": ["string", "null"]},
+      "verification": {"type": "object", "required": ["status"], "properties": {"status": {"type": "string"}}, "additionalProperties": true}
+    }, "additionalProperties": true},
+    "navigation": {"type": "object"}, "events": {"type": "array"}, "metrics": {"type": "object"},
+    "privacy": {"type": "object", "required": ["redacted", "excluded", "reasons"], "properties": {
+      "redacted": {"type": "boolean"}, "excluded": {"type": "boolean"}, "reasons": {"type": "array", "items": {"type": "string"}}
+    }, "additionalProperties": true},
+    "verification": {"type": "object", "properties": {"status": {"enum": ["verified", "unverified"]}, "source": {"enum": ["fixture_assertion", "human_review", "agent_claim"]}}, "additionalProperties": true}
+  },
+  "$defs": {
+    "action_decision": {"type": "object", "required": ["source", "model", "tool_call_id", "candidate_actions", "confidence"], "properties": {
+      "source": {"type": ["string", "null"]}, "model": {"type": ["string", "null"]}, "tool_call_id": {"type": ["string", "null"]},
+      "candidate_actions": {"type": "array"}, "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+    }, "additionalProperties": true},
+    "state": {"type": "object", "required": ["fingerprint", "package_name", "nodes", "width", "height", "training_allowed", "redacted"], "properties": {
+      "fingerprint": {"type": "string"}, "package_name": {"type": "string"}, "nodes": {"type": "array"},
+      "width": {"type": "number", "minimum": 0}, "height": {"type": "number", "minimum": 0},
+      "training_allowed": {"type": "boolean"}, "redacted": {"type": "boolean"}
+    }, "additionalProperties": true}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"record_type": {"const": "action"}}},
+      "then": {
+        "required": ["before", "after", "action", "decision", "result", "navigation", "events", "metrics", "privacy"],
+        "properties": {"decision": {"$ref": "#/$defs/action_decision"}}
+      }
+    },
+    {
+      "if": {"properties": {"record_type": {"const": "agent_feedback"}}},
+      "then": {
+        "properties": {
+          "verification": {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+              "status": {"enum": ["verified", "unverified"]},
+              "source": {"enum": ["fixture_assertion", "human_review", "agent_claim"]}
+            },
+            "default": {"status": "unverified"},
+            "allOf": [{"if": {"properties": {"status": {"const": "verified"}}}, "then": {"required": ["source"]}}]
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "daxqo_collector": {
+      "command": "/absolute/path/to/venv/python",
+      "args": [
+        "-m",
+        "trajectory.mcp_server",
+        "--data",
+        "/absolute/path/to/dataset",
+        "--device-id",
+        "b683d45a-e298-40b3-90c2-3bcd8f59cb84",
+        "--source",
+        "my_harness"
+      ]
+    }
+  }
+}
